@@ -48,6 +48,9 @@ def decode_file_name(filename_without_path):
 
 #------------------------ CLASSES ----------------------------------------------------------
 class SequencingTrackTable:
+    """
+    Keeps track of the base frequencies at a given position of the sequencing.
+    """
 
     def __init__(self, length):
         self.track_length = length
@@ -62,6 +65,9 @@ class SequencingTrackTable:
         return
 
     def add_seq(self, sequence):
+        """
+        Adds a sequence into the track table - the table with frequencies of the bases at given positions of the amplicons.
+        """
         seq_id = "NA"
         if isinstance(sequence, Seq):
             seq_id = sequence.id
@@ -118,7 +124,7 @@ class StaggeredDataset:
     Analysed library set of staggered read files.
     The whole process is launched upon initialization
     """
-    def __init__(self, source_dir, target_dir, track_tables_fn = None, primer_description_file = "primers_cinek.txt",
+    def __init__(self, source_dir, target_dir, track_tables_fn = None, primer_description_file = "primers_16SV34_staggered.txt",
                  write_to_files_of_combinations = False, trim_only_spacers = False,  trim_whole_primer = True,
                  trim_last_bases_r1 = 0, trim_last_bases_r2 = 0,
                  merge_pairs_by_usearch = False, usearch = "H:/mikro/programs/nextgen/automating_16S/usearch11.0.667_win32.exe",
@@ -221,8 +227,10 @@ class StaggeredDataset:
         self.track_tables_r2 = {}
 
         # ------------ Primers -------------------
-        if self.primer_description_file == "primers_cinek.txt" and (not os.path.exists(self.primer_description_file) or not os.path.isfile(self.primer_description_file)):
-            self.write_primers_cinek_txt()
+        if self.primer_description_file == "primers_16SV34_staggered.txt" and (not os.path.exists(self.primer_description_file) or not os.path.isfile(self.primer_description_file)):
+            self.write_primers_description_txt(primer_set_name="primer_set_16SV34")
+        if self.primer_description_file == "primers_blasto_staggered.txt" and (not os.path.exists(self.primer_description_file) or not os.path.isfile(self.primer_description_file)):
+            self.write_primers_description_txt(primer_set_name="blastocystis_subtyping")
         self.primers = []
         # Here we store the signature sequences to tell the "mix and spacer" combinations apart. Is populated by the load_primer_set method.
         self.mix_offset_signature_sequences_f = {}
@@ -248,10 +256,21 @@ class StaggeredDataset:
         self.save_track_tables()
         return
 
-    def write_primers_cinek_txt(self):
-        with open(self.primer_description_file, mode = "w") as outhandle:
-            print(
-"""Bact341_0_for5 CCTACGGGAGGCAGCAG f v34 0
+    def write_primers_description_txt(self, primer_set_name):
+        """ This function writes a table with primers, if not found.
+
+        The file describing primers is a header-less text file with columns separated by a whitespace.
+        There are 6 columns:
+        1) primer name
+        2) primer sequence
+        3) f = forward, r = reverse
+        4) reaction (amplicon) name - for instance, the V3-V4 region is amplified in two reactions,
+                    one in the direction of V3 -> V4, the other in the direction of V4 -> V3
+        5) count of inserted bases (the length of the spacer)
+
+        """
+        primer_sets = dict(
+        primer_set_16SV34 = """Bact341_0_for5 CCTACGGGAGGCAGCAG f v34 0
 Bact341_2_for5 gaCCTACGGGAGGCAGCAG f v34 2
 Bact341_3_for5 tagCCTACGGGAGGCAGCAG f v34 3
 Bact341_6_for5 agcaattCCTACGGGAGGCAGCAG f v34 7
@@ -267,9 +286,31 @@ B806_341_0_rev7 CCTACGGGAGGCAGCAG r v43 0
 B806_341_2_rev7 gaCCTACGGGAGGCAGCAG r v43 2
 B806_341_3_rev7 tagCCTACGGGAGGCAGCAG r v43 3
 B806_341_6_rev7 agcaattCCTACGGGAGGCAGCAG r v43 7
-""", file=outhandle)
+""",
+        blastocystis_subtyping = """BT_F0_for5 GGAGGTAGTGACAATAAATC f reaction1_direct 0
+BT_F1_for5 aGGAGGTAGTGACAATAAATC f reaction1_direct 1
+BT_F2_for5 caGGAGGTAGTGACAATAAATC f reaction1_direct 2
+BT_F3_for5 actGGAGGTAGTGACAATAAATC f reaction1_direct 3
+BT_R0_rev7 TGCTTTCGCACTTGTTCATC r reaction1_direct 0
+BT_R1_rev7 aTGCTTTCGCACTTGTTCATC r reaction1_direct 1
+BT_R2_rev7 caTGCTTTCGCACTTGTTCATC r reaction1_direct 2
+BT_R3_rev7 actTGCTTTCGCACTTGTTCATC r reaction1_direct 3
+BT_R0_for5 TGCTTTCGCACTTGTTCATC f reaction2_reversed 0
+BT_R1_for5 aTGCTTTCGCACTTGTTCATC f reaction2_reversed 1
+BT_R2_for5 caTGCTTTCGCACTTGTTCATC f reaction2_reversed 2
+BT_R3_for5 actTGCTTTCGCACTTGTTCATC f reaction2_reversed 3
+BT_F0_rev7 GGAGGTAGTGACAATAAATC r reaction2_reversed 0
+BT_F1_rev7 aGGAGGTAGTGACAATAAATC r reaction2_reversed 1
+BT_F2_rev7 caGGAGGTAGTGACAATAAATC r reaction2_reversed 2
+BT_F3_rev7 actGGAGGTAGTGACAATAAATC r reaction2_reversed 3
+"""
+        )
+
+        with open(self.primer_description_file, mode = "w") as outhandle:
+            print(primer_sets[primer_set_name], file=outhandle)
 
         return
+
 
     def load_primer_set(self):
         """Loads the primer info from a file.
@@ -298,6 +339,9 @@ B806_341_6_rev7 agcaattCCTACGGGAGGCAGCAG r v43 7
         lines = [line.rstrip("\n") for line in lines]
         lines = [line for line in lines if line != ""]
         self.primers = [dict(zip(["name","seq_orig","fr","mix","offset"], x.split())) for x in lines]
+        for primer in self.primers: # no underscores in the mix names!
+            primer["mix"] = re.sub("_", "", primer["mix"])
+        print(self.primers)
 
         for primer in self.primers:
             primer["offset"] = int(primer["offset"])
@@ -595,10 +639,10 @@ B806_341_6_rev7 agcaattCCTACGGGAGGCAGCAG r v43 7
                     # Writing the reads
                     # For mix v34, the reads will be writted as they are. For mix v43 the reads will be switched
                     # in order to keep the whole resulting fastq file consistent: one fastq starting in v3, the other starting in v4 reverse
-                    if (mix_f == mix_r and mix_f == "v43"):
+                    if (mix_f == mix_r and (mix_f == "v43" or mix_f == "reaction2reversed")):
                         #swap them
                         (trimmed_read2, trimmed_read1) = (trimmed_read1, trimmed_read2)
-                    elif (mix_f == mix_r and mix_f == "v34"):
+                    elif (mix_f == mix_r and (mix_f == "v34" or mix_f == "reaction1direct")):
                         pass
                     else:
                         raise ValueError("Unexpected combination of mixes")
@@ -740,14 +784,14 @@ def process_args_and_run():
     parser.add_argument(
         '-track_tables_fn',
         type=str,
-        help="Resulting tables with representation of bases in the sequencing files. Not needed unless you test new primer sets. (not required)",
+        help="A name for herein generated tables with representation of bases in the sequencing files. Not needed unless you test a new primer sets. (not required)",
         default=None)
 
     parser.add_argument(
         '-primer_description_file',
         type=str,
-        help="A primer description file formatted as specified in the documentation (not required; deafult = file primers_cinek.txt, a primer file supplied with the script).",
-        default = "primers_cinek.txt")
+        help="A primer description file formatted as specified in the documentation (not required; deafult = primers_16SV34_staggered.txt, for 16S rDNA).",
+        default = "primers_16SV34_staggered.txt")
 
     parser.add_argument(
         '-usearch',
@@ -770,8 +814,8 @@ def process_args_and_run():
                         default=0,
                         help="reverse read - how many bases should be trimmed from the end? Some MiSeq runs have the last base of very low quality.  default = 0")
 
-    parser.add_argument('--trim_only_spacers', action='store_true', help = "What to trim - only the heterogeneity spacers, whereas primers are retained? default = False")
-
+    parser.add_argument('--trim_only_spacers', action='store_true',
+                        help = "What to trim - only the heterogeneity spacers, whereas primers are retained? Default = False")
     parser.add_argument('--trim_whole_primer', action='store_true',
                         help = "What to trim - trim the whole primers? default = True")
     parser.add_argument('--do_not_trim_whole_primer', dest='trim_whole_primer', action='store_false',
@@ -782,11 +826,11 @@ def process_args_and_run():
                         action='store_true',
                         help="Should fastq files be generated also for all single combination of primers? default = False")
 
-    parser.add_argument('--do_not_overwrite', action='store_true', help="Continue where the previous process stopped? default = False")
+    parser.add_argument('--do_not_overwrite', action='store_true', help="Continue where (if) the previous process stopped? default = False")
 
     parser.add_argument(
         '-fastq_minmergelen',
-        help="minimum length of the merged sequence. Default 350 (because of V3-4 of the 16S rDNA)",
+        help="minimum length of the merged sequence. Default 350 (because of V3-4 of the 16S rDNA; a bit too short for Blastocystis subtyping)",
         type=int,
         default="350")
 
@@ -798,9 +842,9 @@ def process_args_and_run():
 
     parser.add_argument(
         '-fastq_maxmergelen',
-        help="maximum length of the merged sequence. Default 490 (because of V3-4 of the 16S rDNA)",
+        help="maximum length of the merged sequence. Default 500 (works well both for the V3-4 of the 16S rDNA, and Blastocystis subtyping)",
         type=int,
-        default="490")
+        default="500")
 
     parser.add_argument(
         '-fastq_maxdiffs',
@@ -842,65 +886,10 @@ def process_args_and_run():
 
 
 if __name__ == '__main__':
-
     process_args_and_run()
 
     # DEBUGGING runs:
     # just note that the script can be also downloaded as a module, and run like this.
-
-
-    #st_ds = StaggeredDataset(  source_dir = "H:/mikro/ngs_16s/33_202212_lucka_006_lowca/run_data_from_sequencer",
-    #                           target_dir = "H:/mikro/ngs_16s/33_202212_lucka_006_lowca/sorted_staggering",
-    #                           track_tables_fn="H:/mikro/ngs_16s/33_202212_lucka_006_lowca/track_tables.txt"
-    #                        )
-
-    # st_ds = StaggeredDataset( source_dir =      "H:/mikro/ngs_16s/00_test_staggered_ondrej/run_data_from_sequencer",
-    #                           target_dir =      "H:/mikro/ngs_16s/00_test_staggered_ondrej/",
-    #                           track_tables_fn = "H:/mikro/ngs_16s/00_test_staggered_ondrej/track_tables.txt",
-    #                           fastq_maxdiffs = 10,
-    #                           merge_pairs_by_usearch = 1
-    #                        )
-
-    #st_ds = StaggeredDataset(   source_dir = "H:/mikro/ngs_16s/33_202212_lucka_006_lowca_v02_kit_2x250/run_data_from_sequencer",
-    #                            target_dir = "H:/mikro/ngs_16s/33_202212_lucka_006_lowca_v02_kit_2x250/sorted_staggering",
-    #                            track_tables_fn = "H:/mikro/ngs_16s/33_202212_lucka_006_lowca_v02_kit_2x250/track_tables.txt"
-    #)
-    #
-    #  st_ds = StaggeredDataset(   source_dir = "H:/mikro/ngs_16s/34_202303_honey_bees/run_data_from_sequencer",
-    #                              target_dir = "H:/mikro/ngs_16s/34_202303_honey_bees/sorted_staggering",
-    #                              track_tables_fn = "H:/mikro/ngs_16s/34_202303_honey_bees/track_tables.txt",
-    #                              trim_last_bases_r1 = 1,
-    #                              fastq_maxdiffs = 5,
-    #                              merge_pairs_by_usearch = 1
-    # )
-    #
-
-    # st_ds = StaggeredDataset(   source_dir = "H:/mikro/ngs_16s/37_lesrus/run_data_from_sequencer",
-    #                             target_dir = "H:/mikro/ngs_16s/37_lesrus/sorted_staggering",
-    #                             track_tables_fn = "H:/mikro/ngs_16s/37_lesrus/track_tables.txt",
-    #                             trim_last_bases_r1 = 1,
-    #                             trim_last_bases_r2 = 1,
-    #                             fastq_maxdiffs = 5,
-    #                             merge_pairs_by_usearch = 1
-    # )
-    #
-
-    # st_ds = StaggeredDataset(source_dir="H:/mikro/ngs_16s/39_lucka_008_ibs_part1/run_data_from_sequencer",
-    #                      target_dir="H:/mikro/ngs_16s/39_lucka_008_ibs_part1/sorted_staggering",
-    #                      track_tables_fn="H:/mikro/ngs_16s/39_lucka_008_ibs_part1/track_tables.txt",
-    #                      trim_last_bases_r1=1,
-    #                      trim_last_bases_r2=1,
-    #                      fastq_maxdiffs=5,
-    #                      merge_pairs_by_usearch=1
-    #                      )
-    # st_ds = StaggeredDataset(source_dir="H:/mikro/ngs_16s/40_skins_doormats/run_data_from_sequencer",
-    #                      target_dir="H:/mikro/ngs_16s/40_skins_doormats/sorted_staggering",
-    #                      track_tables_fn="H:/mikro/ngs_16s/40_skins_doormats/track_tables.txt",
-    #                      trim_last_bases_r1=1,
-    #                      trim_last_bases_r2=1,
-    #                      fastq_maxdiffs=5,
-    #                      merge_pairs_by_usearch=1
-    #                      )
     # st_ds = StaggeredDataset(
     #     source_dir="H:/mikro/ngs_16s/41_ibs_po_fmt/run_data_from_sequencer",
     #     target_dir="H:/mikro/ngs_16s/41_ibs_po_fmt/sorted_staggering",
@@ -912,5 +901,17 @@ if __name__ == '__main__':
     #     max_reads_per_sample = 100000,
     #     do_not_overwrite = True
     #
+    # )
+    # st_ds = StaggeredDataset(
+    #     source_dir=r"H:\mikro\ngs_virome\blasto_202408\run_data_from_sequencer",
+    #     target_dir=r"H:\mikro\ngs_virome\blasto_202408\sorted_staggering",
+    #     track_tables_fn=r"H:\mikro\ngs_virome\blasto_202408\track_tables.txt",
+    #     primer_description_file="primers_blasto_staggered.txt",
+    #     trim_last_bases_r1=0,
+    #     trim_last_bases_r2=0,
+    #     fastq_maxdiffs=5,
+    #     merge_pairs_by_usearch=1,
+    #     max_reads_per_sample = 10000,
+    #     do_not_overwrite = True
     # )
 
