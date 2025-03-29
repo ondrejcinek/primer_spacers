@@ -38,7 +38,8 @@ def decode_file_name(filename_without_path):
     if result:
         name = result.group(1)
         direction = result.group(2)
-        reaction_name = name.replace("_", "")
+        reaction_name = name
+        # reaction_name = reaction_name.replace("_", "")
         reaction_name = reaction_name.replace("-", "")
         reaction_name = reaction_name.replace(".", "")
         reaction_name = reaction_name.replace(":", "")
@@ -433,10 +434,11 @@ BT_F3_rev7 actGGAGGTAGTGACAATAAATC r reaction2_reversed 3
         # ----------- Find the files in the hierarchical structure
         for (dirpath, dirnames, filenames) in os.walk(self.source_dir, topdown=True):
             fastq_filenames = [x for x in filenames if re.search(r"(\.fastq|\.fq)(?:\.gz)?$", x, re.I)]
+            # print(fastq_filenames)
             for filename in fastq_filenames:
-                res0 = re.search(r"([^_]+)_(S\d+)_L001_R([12])_001\.fastq(?:\.gz)?", filename, re.I)
+                res0 = re.search(r"^([^\/\\]*)_(S\d+)_L001_R([12])_001\.fastq(?:\.gz)?", filename, re.I)
                 if not res0:
-                    raise ValueError("Wrong name format of the fastq file " + filename)
+                    raise ValueError("Wrong name format of the fastq file: " + filename)
                 libname = res0.group(1)
                 r1or2 = res0.group(3)              
                 
@@ -691,7 +693,14 @@ BT_F3_rev7 actGGAGGTAGTGACAATAAATC r reaction2_reversed 3
                 print("Relative read counts", file=report_handle)
                 print("Relative read counts")
                 for a_key, a_value in self.libraries[libname]["reads_by_mix_offset_combination"].items():
-                    report_line = "   category %15s: abs = %6d,    rel = %5.2f%%" % (a_key, a_value, 100*a_value/reduced_read_count)
+                    percentage = "NA"
+                    if reduced_read_count > 0:
+                        percentage = "%5.2f%%" % (100 * a_value / reduced_read_count)
+                    report_line = "   category %15s: abs = %6d,   %s" % (
+                        a_key,
+                        a_value,
+                        percentage
+                    )
                     print(report_line, file=report_handle)
                     print(report_line)
 
@@ -914,4 +923,15 @@ if __name__ == '__main__':
     #     max_reads_per_sample = 10000,
     #     do_not_overwrite = True
     # )
+    # st_ds = StaggeredDataset(
+    #         source_dir="H:/mikro/ngs_16s/42_lowca/run_data_from_sequencer",
+    #         target_dir="H:/mikro/ngs_16s/42_lowca/sorted_staggering",
+    #         track_tables_fn="H:/mikro/ngs_16s/42_lowca/track_tables.txt",
+    #         trim_last_bases_r1=0,
+    #         trim_last_bases_r2=0,
+    #         fastq_maxdiffs=5,
+    #         merge_pairs_by_usearch=1,
+    #         max_reads_per_sample = 500000,
+    #         do_not_overwrite = True
+    #     )
 
