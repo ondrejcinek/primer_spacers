@@ -1,0 +1,598 @@
+---
+title: "Design the staggered primers"
+author: "ONDREJ CINEK"
+date: "29/3/2023"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+
+Load the libraries
+```{r setup}
+rm(list = ls())
+#-------------------------------------#
+# correct to your path
+#wdir = "E:/data/bacteriome_00_staggered_primers"
+#setwd(wdir)
+#-------------------------------------#
+library(tidyverse)
+library(microseq)
+library(patchwork)
+library(shiny)
+
+theme_set(theme_bw()) #publication-quality black and white scale
+
+```
+
+Load the sequences without staggering
+```{r}
+reads_without_staggering <- readRDS(file= "./non_staggered_sequencing_reads.RData")
+target_properties <-  readRDS(file= "./target_properties.RData")
+```
+
+
+# Definition of functions
+plot the base homogeneity
+```{r}
+plot_bases <- function(track_from_sequencing, direction_r1r2, maxx = 251, step = 10, name = "", show_title = F){
+
+    if (direction_r1r2 == "R1R2") {
+        filtered_track <- track_from_sequencing
+    } else {
+        filtered_track <- track_from_sequencing %>% filter(toupper(direction) == toupper(direction_r1r2))
+    }
+    
+    sumdat <- filtered_track %>% 
+        group_by(pos) %>% 
+        summarize(
+            sumA = sum(A), sumC = sum(C), sumG = sum(G), sumT= sum(T)
+            ) %>% 
+        mutate(
+                  coverage = sumA+sumC+sumG+sumT,
+                  relA = sumA/coverage, relC = sumC/coverage, relG=sumG/coverage, relT = sumT/coverage,
+                  max_rel = pmax(relA, relC, relG, relT), #rowwise max
+                  max_base = case_when(
+                      relA == max_rel ~ "A",
+                      relC == max_rel ~ "C",
+                      relG == max_rel ~ "G",
+                      relT == max_rel ~ "T"
+                  )
+        )
+    
+    
+    p1 <- ggplot(data = sumdat, mapping = aes(x=pos, y=100*max_rel)) +
+        geom_point(aes(color = max_base), size = 2)+
+        geom_line(linewidth = 0.3, color = "lightgrey") + 
+        labs(
+            x ="Position in sequencing", 
+            y = "Most prevalent base %") + 
+        theme(plot.title = element_text(size=10)) + 
+        scale_y_continuous(limits = c(0,100), breaks = c(0,25,50,75,100))+
+        scale_x_continuous(limits = c(0,maxx), breaks = seq(from = 0, to = maxx, by = step))
+    if (show_title) {
+        p1 <- p1 + ggtitle( name )
+    }
+
+    
+    return(p1)
+}
+```
+
+Add staggering to the original track
+```{r}
+add_staggering <- function(
+        original_track, 
+        addition, 
+        direction_r1r2, 
+        read_length = 251
+        ){
+    
+    direction_r1r2 <- toupper(direction_r1r2)
+    addition <- toupper(addition)
+    
+    # if original track consists of more than one signal, now it is time to merge...
+    template_track <- original_track %>% 
+        filter(toupper(direction) == toupper(direction_r1r2)) %>% 
+        group_by(pos) %>% 
+        summarise(
+            direction = first(direction),
+            A = sum(A),
+            C = sum(C),
+            G = sum(G),
+            T = sum(T)
+    )
+    
+    if (nchar(addition) == 0) {
+        return(template_track)    
+    }
+    
+    if (str_detect(addition, "[ACGT]", negate = T)){
+        print(addition)
+        stop("The addition contains other bases than A, C, G or T.")
+    }
+    
+    #find total coverage of the first position - this will also be the coverage of the addition.
+    first_base_coverage <- template_track %>% 
+        filter(pos == 1) %>% 
+        mutate(coverage = A+C+G+T) %>% 
+        pull(coverage) 
+    
+    #shift all positions
+    new_track <- template_track %>% 
+        mutate(pos = pos + nchar(addition)) %>% 
+        filter(pos <= read_length)
+    
+    for (i in rev(1:nchar(addition))){ #last base first...
+        this_base = substr(addition, i, i)
+        one_base_tibble <- tibble(
+                direction = toupper(direction_r1r2), 
+                pos = i, 
+                A = if_else(substr(addition, i, i) == "A", first_base_coverage, 0), 
+                C = if_else(substr(addition, i, i) == "C", first_base_coverage, 0),
+                G = if_else(substr(addition, i, i) == "G", first_base_coverage, 0), 
+                T = if_else(substr(addition, i, i) == "T", first_base_coverage, 0)
+            )
+        new_track <- bind_rows(
+            one_base_tibble,
+            new_track
+        )
+    }
+    if (direction_r1r2 == "R1"){
+        new_track$f_primer_and_spacer = addition    
+    } else if(direction_r1r2 == "R2"){
+        new_track$r_primer_and_spacer = addition
+    } else {
+        stop("Direction not R1 nor R2")
+    }
+    return(new_track)
+}
+```
+
+
+# Process the reads for the shiny app
+```{r}
+
+target = "blastocystis"
+original_track = reads_without_staggering[[target]]$track_from_sequencing
+addition_queue_read1 = c("AAAA")
+addition_queue_read2 = c()
+read_length = 251
+direction_r1r2 = "r1"
+
+
+process_additions <- function(
+        original_track, 
+        invert_the_reads,
+        addition_queue_read1,
+        addition_queue_read2,
+        read_length = 251
+    ){
+    
+    new_tracks = list()
+    
+    addition_queue = list(
+        r1 = addition_queue_read1,
+        r2 = addition_queue_read2
+    )
+    
+    if (invert_the_reads){
+        oriented_track <- original_track %>% 
+                select(direction, pos, A, C, G, T) %>% 
+              mutate(
+                direction = case_when(
+                  toupper(direction) == "R1" ~ "R2",
+                  toupper(direction) == "R2" ~ "R1",
+                  TRUE ~ NA_character_
+                )
+              )
+    } else {
+        oriented_track = original_track %>% select(direction, pos, A, C, G, T)
+    }
+
+    
+    for (direction_r1r2 in c("r1", "r2")){
+        # set up before adding any staggering
+        filtered_track <- oriented_track %>% filter(toupper(direction) == toupper(direction_r1r2))
+        gradually_developed_track <- filtered_track # starting with primers without added staggering
+        
+        # gradually add staggering alternative by alternative
+        for (addition in addition_queue[[direction_r1r2]]){
+            new_staggered_variant_of_filtered_track <- add_staggering(
+                    filtered_track,
+                    addition=addition, 
+                    direction_r1r2 = direction_r1r2,
+                    read_length = read_length
+                )
+            gradually_developed_track <- bind_rows(
+                gradually_developed_track,
+                new_staggered_variant_of_filtered_track
+            )
+        }
+        
+        new_tracks[[direction_r1r2]] <- gradually_developed_track %>% 
+            group_by(pos) %>% 
+            summarise(A = sum(A), C = sum(C), G = sum(G), T=sum(T)) %>% 
+            mutate(
+                direction = toupper(direction_r1r2),
+                coverage = A+C+G+T,
+                relA = A/coverage, relC = C/coverage, relG=G/coverage, relT = T/coverage,
+                max_rel = pmax(relA, relC, relG, relT) 
+             )
+    }
+    
+    new_track <- bind_rows(new_tracks[["r1"]], new_tracks[["r2"]])
+    
+    return (new_track)        
+}
+
+```
+
+
+
+```{r}
+draw_sixplot <- function(target, reaction1_track_with_additions, reaction2_track_with_additions){
+    
+    
+    f_primer_name = target_properties[[target]][["primer_names"]]["f"]
+    r_primer_name = target_properties[[target]][["primer_names"]]["r"]
+    
+    pl_reaction1_read1 <- plot_bases(
+        track_from_sequencing = reaction1_track_with_additions , 
+        direction_r1r2 = "R1" , 
+        show_title = F
+    ) + 
+        theme(axis.title.x = element_blank()) + 
+        ggtitle(paste0("Read 1 (P5): amplicon of direct orientation (reaction 1); P5tag-pad-(spacer)-", f_primer_name)) +
+        theme(plot.title = element_text(size = 19))
+    
+    
+    pl_reaction2_read1 <- plot_bases(
+        track_from_sequencing = reaction2_track_with_additions , 
+        direction_r1r2 = "R1" , 
+        show_title = F
+    ) + theme(axis.title.x = element_blank()) + 
+        ggtitle(paste0("Read 1 (P5): amplicon of reversed orientation (reaction 2); P5tag-pad-(spacer)-", r_primer_name)) +
+        theme(plot.title = element_text(size = 19))
+
+    
+    pl_both_reactions_read1 <- plot_bases(
+        track_from_sequencing = bind_rows(reaction1_track_with_additions, reaction2_track_with_additions) , 
+        direction_r1r2 = "R1" , 
+        show_title = F
+    ) + ggtitle(paste0("Read 1 (P5): Mixed signal of both P5-tagged amplicons when read together in the sequencer.")) +
+        theme(plot.title = element_text(size = 19))
+    
+    pl_reaction1_read2 <- plot_bases(
+        track_from_sequencing = reaction1_track_with_additions , 
+        direction_r1r2 = "R2" , 
+        show_title = F
+    ) + 
+        theme(axis.title.x = element_blank()) + 
+        ggtitle(paste0("Read 2 (P7): amplicon of direct orientation (reaction 1); P7tag-pad-(spacer)-", r_primer_name)) +
+        theme(plot.title = element_text(size = 19))
+    
+    pl_reaction2_read2 <- plot_bases(
+        track_from_sequencing = reaction2_track_with_additions , 
+        direction_r1r2 = "R2" , 
+        show_title = F
+    ) + theme(axis.title.x = element_blank()) + 
+        ggtitle(paste0("Read 2 (P7): amplicon of reversed orientation (reaction 2); P5tag-pad-(spacer)-", f_primer_name)) +
+        theme(plot.title = element_text(size = 19))
+
+    
+    pl_both_reactions_read2 <- plot_bases(
+        track_from_sequencing = bind_rows(reaction1_track_with_additions, reaction2_track_with_additions)  , 
+        direction_r1r2 = "R2" , 
+        show_title = F
+    ) + ggtitle(paste0("Read 2 (P7): Mixed amplicons from both P7-tagged reactions read together")) +
+        theme(plot.title = element_text(size = 19))
+    
+    
+    sixplot <-( (pl_reaction1_read1 + pl_reaction1_read2) / (pl_reaction2_read1+pl_reaction2_read2) / (pl_both_reactions_read1+pl_both_reactions_read2) )+
+        plot_layout(guides = "collect") & 
+        theme(legend.position = "right")
+
+    
+    return(sixplot)
+}
+
+
+
+```
+
+process additions and draw sixplot
+```{r}
+process_additions_and_draw_sixplots <- function(target, reaction1_p5_additions, reaction1_p7_additions, reaction2_p5_additions, reaction2_p7_additions){
+
+    reaction1_track_with_additions <- process_additions(
+                                original_track = reads_without_staggering[[target]]$track_from_sequencing, 
+                                invert_the_reads = F,
+                                addition_queue_read1 = reaction1_p5_additions,
+                                addition_queue_read2 = reaction1_p7_additions,
+                                read_length = 251
+                            )
+    
+    reaction2_track_with_additions <- process_additions(
+                                original_track = reads_without_staggering[[target]]$track_from_sequencing, 
+                                invert_the_reads = T,
+                                addition_queue_read1 = reaction2_p5_additions,
+                                addition_queue_read2 = reaction2_p7_additions,
+                                read_length = 251
+                            )
+    
+    my_plot <- draw_sixplot(target, reaction1_track_with_additions, reaction2_track_with_additions)
+
+    return(my_plot)
+}
+
+```
+
+
+shiny UI
+```{r}
+ui <- fluidPage(
+   
+ 
+  tags$head(
+      tags$script(HTML("
+          function restrictInputToACGT(inputId) {
+            document.getElementById(inputId).addEventListener('input', function(event) {
+              const value = event.target.value.toUpperCase().replace(/[^ACGT]/gi, '');
+              event.target.value = value;
+            });
+          }
+        
+          document.addEventListener('DOMContentLoaded', function() {
+            const ids = [
+              'reaction1_f1', 'reaction1_f2', 'reaction1_f3', 'reaction1_f4',
+              'reaction1_r1', 'reaction1_r2', 'reaction1_r3', 'reaction1_r4',
+              'reaction2_f1', 'reaction2_f2', 'reaction2_f3', 'reaction2_f4',
+              'reaction2_r1', 'reaction2_r2', 'reaction2_r3', 'reaction2_r4'
+            ];
+            ids.forEach(restrictInputToACGT);
+          });
+        ")),
+    # Add custom CSS to make the label larger
+    tags$style(HTML("
+      /* Increase the font size of the label */
+      label[for='target'] {
+        font-size: 36px !important;  /* Larger font for the label */
+        font-weight: bold !important;
+        white-space: nowrap !important;  /* Prevent line breaks */
+        display: block;
+      }
+
+      /* Make the font size for the selectInput box larger */
+      #target {
+        font-size: 24px !important;   /* Dropdown items */
+        width: 100%;
+      }
+      
+      /* Make the button bigger and red */
+      #redraw {
+        font-size: 24px !important;
+        background-color: #d9534f !important;
+        color: white !important;
+        padding: 10px 20px !important;
+        border-radius: 8px !important;
+      }
+
+      /* Ensure the dropdown list also has large font */
+      .selectize-input {
+        font-size: 24px !important;
+      }
+      
+      .selectize-dropdown {
+        font-size: 24px !important;
+      }
+    "))
+  ),
+  
+  # The selectInput with a larger label
+  selectInput(
+    inputId = "target",
+    label = "Pick the target for creating staggered primers:",
+    choices = names(target_properties),
+    selected = names(target_properties)[1],
+    width = "100%"
+  ),
+  
+
+  fluidRow(
+    column(12,
+      wellPanel(
+        h3("REACTION 1: DIRECT orientation of the amplicon; P5 overhang coupled with the FORWARD primer, P7 with REVERSE"),
+
+        wellPanel(
+          h4("The reaction 1 Read 1 primers: P5-tag, pad, spacer varying in length, and FORWARD specific primer"),
+          h4("Here you fill in the additional bases flanking the forward primers"),
+          fluidRow(
+            column(3,
+              div(
+                tags$label("F primer: variant 1"),
+                textInput("reaction1_f1", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("F primer: variant 2"),
+                textInput("reaction1_f2", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("F primer: variant 3"),
+                textInput("reaction1_f3", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("F primer: variant 4"),
+                textInput("reaction1_f4", NULL, value = "", width = "100%")
+              )
+            )
+          )
+        ),
+
+        wellPanel(
+          h4("The reaction 1 Read 2 primers: P7-tag, pad, spacer varying in length, and REVERSE specific primer"),
+          h4("Here you fill in the additional bases flanking the reverse primers"),
+          
+          fluidRow(
+            column(3,
+              div(
+                tags$label("R primer: variant 1"),
+                textInput("reaction1_r1", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3, 
+              div(
+                tags$label("R primer: variant 2"),
+                textInput("reaction1_r2", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("R primer: variant 3"),
+                textInput("reaction1_r3", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("R primer: variant 4"),
+                textInput("reaction1_r4", NULL, value = "", width = "100%")
+              )
+            )
+          )
+        )
+      )
+    ),
+
+    column(12,
+      wellPanel(
+        h3("REACTION 2: REVERSED orientation of the amplicon; P5 overhang coupled with the REVERSE primer, P7 with FORWARD"),
+
+        wellPanel(
+          h4("The reaction 2 Read 1 primers: P5-tag, pad, spacer varying in length, and REVERSE specific primer"),
+          h4("Here you fill in the additional bases flanking the REVERSE specific primer"),
+          fluidRow(
+            column(3,
+              div(
+                tags$label("R primer: variant 1"),
+                textInput("reaction2_r1", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("R primer: variant 2"),
+                textInput("reaction2_r2", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("R primer: variant 3"),
+                textInput("reaction2_r3", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("R primer: variant 4"),
+                textInput("reaction2_r4", NULL, value = "", width = "100%")
+              )
+            )
+          
+          
+          )
+        ),
+
+        wellPanel(
+          h4("The reaction 2 Read 2 primers: P7-tag, pad, spacer varying in length, and FORWARD specific primer"),
+          h4("Here you fill in the additional bases flanking the FORWARD specific primer"),
+          fluidRow(
+            column(3,
+              div(
+                tags$label("F primer: variant 1"),
+                textInput("reaction2_f1", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("F primer: variant 2"),
+                textInput("reaction2_f2", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("F primer: variant 3"),
+                textInput("reaction2_f3", NULL, value = "", width = "100%")
+              )
+            ),
+            column(3,
+              div(
+                tags$label("F primer: variant 4"),
+                textInput("reaction2_f4", NULL, value = "", width = "100%")
+              )
+            )
+          
+          )
+        )
+      )
+    )
+  ),
+
+  actionButton("redraw", "Redraw the plots accordingly"),
+  br(), br(),
+  plotOutput(outputId = "sixplot", height = "600px", width = "100%")
+)
+
+
+```
+
+
+
+shiny server
+```{r}
+server <- function(input, output) {
+
+    sixplot_data <- reactive({
+        input$redraw   # trigger dependency
+        input$target   # trigger dependency
+      
+        isolate({
+                reaction1_f_additions <- toupper(c(input$reaction1_f1, input$reaction1_f2, input$reaction1_f3, input$reaction1_f4))
+                reaction1_r_additions <- toupper(c(input$reaction1_r1, input$reaction1_r2, input$reaction1_r3, input$reaction1_r4))
+                reaction1_f_additions <- reaction1_f_additions[!is.na(reaction1_f_additions) & reaction1_f_additions != ""]
+                reaction1_r_additions <- reaction1_r_additions[!is.na(reaction1_r_additions) & reaction1_r_additions != ""]
+                
+                reaction2_f_additions <- toupper(c(input$reaction2_f1, input$reaction2_f2, input$reaction2_f3, input$reaction2_f4))
+                reaction2_r_additions <- toupper(c(input$reaction2_r1, input$reaction2_r2, input$reaction2_r3, input$reaction2_r4))
+                reaction2_f_additions <- reaction2_f_additions[!is.na(reaction2_f_additions) & reaction2_f_additions != ""]
+                reaction2_r_additions <- reaction2_r_additions[!is.na(reaction2_r_additions) & reaction2_r_additions != ""]
+                
+                process_additions_and_draw_sixplots(
+                  target = input$target,
+                  reaction1_p5_additions = reaction1_f_additions,
+                  reaction1_p7_additions = reaction1_r_additions,
+                  reaction2_p5_additions = reaction2_r_additions, # BEWARE!!! The orientation of the amplicon is reversed. 
+                  reaction2_p7_additions = reaction2_f_additions
+                  
+                )
+            })
+        })
+
+    output$sixplot <- renderPlot({
+            sixplot_data()
+    })
+}
+
+shinyApp(ui = ui, server = server, options = list(display.mode = "showcase"))
+```
+
+
+
+
+
