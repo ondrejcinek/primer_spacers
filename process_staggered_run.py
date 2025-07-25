@@ -211,7 +211,7 @@ class StaggeredDataset:
         # This is only if we merge the two reads by USEARCH
         self.dir_02_merged_by_library = os.path.join(self.target_dir, "02_merged_by_library")
         if self.merge_pairs_by_usearch:
-            if not os.path.exists(usearch) or not os.path.isfile(usearch):
+            if not os.path.exists(self.usearch) or not os.path.isfile(self.usearch):
                 raise ValueError("The USEARCH program has not been found. Please install it from https://www.drive5.com/usearch/download.html \n"
                                  "and supply the path as an usearch argument to this program.\n"
                                  "The free 32-bit version is sufficient.")
