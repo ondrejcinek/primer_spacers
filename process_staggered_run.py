@@ -576,7 +576,7 @@ BT_F3_rev7 actGGAGGTAGTGACAATAAATC r reaction2_reversed 3
             # Reduce the reads on input to the required count
             # --------------------------------------------------------------------------------
             reduced_read_count = None
-            if self.max_reads_per_sample is not None and total_read_count > self.max_reads_per_sample:
+            if self.max_reads_per_sample and total_read_count > self.max_reads_per_sample:
                 indices = sorted(random.sample(range(total_read_count), k=self.max_reads_per_sample))
                 source_reads1 = [source_reads1[i] for i in indices]
                 source_reads2 = [source_reads2[i] for i in indices]
