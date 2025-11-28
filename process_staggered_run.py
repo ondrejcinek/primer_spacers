@@ -799,7 +799,7 @@ def process_args_and_run():
     parser.add_argument(
         '-primer_description_file',
         type=str,
-        help="A primer description file formatted as specified in the documentation (not required; deafult = primers_16SV34_staggered.txt, for 16S rDNA).",
+        help="A primer description file formatted as specified in the documentation (not required; default = primers_16SV34_staggered.txt, for 16S rDNA).",
         default = "primers_16SV34_staggered.txt")
 
     parser.add_argument(
@@ -934,4 +934,5 @@ if __name__ == '__main__':
     #         max_reads_per_sample = 500000,
     #         do_not_overwrite = True
     #     )
+
 
