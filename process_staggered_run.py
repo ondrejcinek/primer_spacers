@@ -162,8 +162,8 @@ class StaggeredDataset:
         :param write_to_files_of_combinations: if true, makes many small files for specific mix-primer combinations
         :param trim_only_spacers: what to trim - only the heterogeneity spacers, whereas while primers are retained?
         :param trim_whole_primer: What to trim - trim the whole primers?
-        :param trim_last_bases_r1: forward read - how many last bases should we trim from R1?
-        :param trim_last_bases_r2: reverse read - how many last bases should we trim from R2?
+        :param trim_last_bases_r1: how many last bases should we trim from R1?
+        :param trim_last_bases_r2: how many last bases should we trim from R2?
 
         The init returns nothing. It launches every method needed and produces the result.
 
@@ -370,9 +370,9 @@ BT_F3_rev7 actGGAGGTAGTGACAATAAATC r reaction2_reversed 3
         self.mix_offset_primer_length_r = {"%s_%d"%(x["mix"], x["offset"]):len(x["sequence"]) for x in self.primers if x["fr"] == "r"}
 
         if len(set(self.mix_offset_signature_sequences_f)) < len(self.mix_offset_signature_sequences_f):
-            raise ValueError("The forward start of mix-spacer combinations cannot be told apart. Either some have the same sequence, or they are too short before the first redundancy.")
+            raise ValueError("The start of mix-spacer combinations cannot be told apart. Either some have the same sequence, or they are too short before the first redundancy.")
         if len(set(self.mix_offset_signature_sequences_r)) < len(self.mix_offset_signature_sequences_r):
-            raise ValueError("The reverse start of mix-spacer combinations cannot be told apart. Either some have the same sequence, or they are too short before the first redundancy.")
+            raise ValueError("The start of mix-spacer combinations cannot be told apart. Either some have the same sequence, or they are too short before the first redundancy.")
 
         # Combination to be reported
         self.mix_offset_combinations = []
@@ -817,11 +817,11 @@ def process_args_and_run():
     parser.add_argument('-trim_last_bases_r1',
                         type= int,
                         default=0,
-                        help = "forward read - how many bases should be trimmed from the end? Some MiSeq runs have the last base of very low quality.  default = 0")
+                        help = "R1 read - how many bases should be trimmed from the end? Some MiSeq runs have the last base of very low quality.  default = 0")
     parser.add_argument('-trim_last_bases_r2',
                         type=int,
                         default=0,
-                        help="reverse read - how many bases should be trimmed from the end? Some MiSeq runs have the last base of very low quality.  default = 0")
+                        help="R2 read - how many bases should be trimmed from the end? Some MiSeq runs have the last base of very low quality.  default = 0")
 
     parser.add_argument('--trim_only_spacers', action='store_true',
                         help = "What to trim - only the heterogeneity spacers, whereas primers are retained? Default = False")
@@ -934,5 +934,6 @@ if __name__ == '__main__':
     #         max_reads_per_sample = 500000,
     #         do_not_overwrite = True
     #     )
+
 
 
