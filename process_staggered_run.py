@@ -172,7 +172,7 @@ class StaggeredDataset:
         #------------------- Get parameters ---------------------------
         self.source_dir = source_dir
         self.target_dir = target_dir
-        self.track_tables_fn = track_tables_fn
+
         self.primer_description_file = primer_description_file
         self.write_to_files_of_combinations = write_to_files_of_combinations
 
@@ -203,6 +203,12 @@ class StaggeredDataset:
         self.dir_01_r1_r2_trimmed_fastq_by_library = os.path.join(self.target_dir, "01_r1_r2_trimmed_fastq_by_library")
         if not os.path.exists(self.dir_01_r1_r2_trimmed_fastq_by_library):
             os.makedirs(self.dir_01_r1_r2_trimmed_fastq_by_library)
+        
+        # Where to put the table tracking the primer combinations
+        self.track_tables_fn = track_tables_fn or "track_table.txt"
+        if not os.path.isabs(self.track_tables_fn):
+            self.track_tables_fn = os.path.join(self.target_dir, self.track_tables_fn)
+        os.makedirs(os.path.dirname(self.track_tables_fn), exist_ok=True)
 
         self.dir_01_r1_r2_fastq_by_combination = os.path.join(self.target_dir, "01_r1_r2_trimmed_fastq_by_library", "by_spacer_combination")
         if write_to_files_of_combinations and not os.path.exists(self.dir_01_r1_r2_fastq_by_combination):
@@ -407,10 +413,6 @@ BT_F3_rev7 actGGAGGTAGTGACAATAAATC r reaction2_reversed 3
     def save_track_tables(self):
         if self.track_tables_fn is None or self.track_tables_fn == "":
             return
-
-        tt_dirs = os.path.split(self.track_tables_fn)[0]
-        if not os.path.exists(tt_dirs):
-            os.makedirs(tt_dirs)
 
         with open(self.track_tables_fn, mode="w") as fh:
             print("\t".join(["mix_offset_combination", "direction", "pos", "base", "count", "coverage"]), file=fh)
@@ -934,6 +936,7 @@ if __name__ == '__main__':
     #         max_reads_per_sample = 500000,
     #         do_not_overwrite = True
     #     )
+
 
 
 
